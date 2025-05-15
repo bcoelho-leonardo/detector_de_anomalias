@@ -1,0 +1,7 @@
+# requirements.txt — versão enxuta para Streamlit Cloud
+streamlit==1.34.0      # interface web
+pandas==2.2.3          # manipulação de dados
+numpy==2.2.5           # arrays numéricos
+scikit-learn==1.6.1    # LOF
+scipy==1.15.3          # dependência do scikit-learn
+openpyxl==3.1.5        # leitura/escrita de Excel

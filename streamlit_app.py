@@ -1,5 +1,10 @@
-# streamlit_app.py
 # -*- coding: utf-8 -*-
+"""
+Created on Fri May 16 11:54:28 2025
+
+@author: Admin
+"""
+
 import streamlit as st
 from io import BytesIO
 from detector_de_anomalias_streamlit import process_file
@@ -21,12 +26,16 @@ uploaded = st.file_uploader("Escolher arquivo Excel", type=["xlsx", "xls"])
 if uploaded:
     if st.button("Processar"):
         with st.spinner("Analisando..."):
-            resultado = process_file(BytesIO(uploaded.read()))
-
-        st.success("Pronto! Baixe o arquivo destacado:")
-        st.download_button(
-            label="⬇️ Download Excel",
-            data=resultado,
-            file_name=uploaded.name.replace(".xlsx", "_highlighted.xlsx"),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+            try:
+                resultado = process_file(BytesIO(uploaded.read()))
+            except Exception as e:
+                st.error(f"Ocorreu um erro ao processar o arquivo: {str(e)}")
+                raise
+            else:
+                st.success("Pronto! Baixe o arquivo destacado:")
+                st.download_button(
+                    label="⬇️ Download Excel",
+                    data=resultado,
+                    file_name=uploaded.name.replace(".xlsx", "_highlighted.xlsx"),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )

@@ -142,49 +142,57 @@ if uploaded:
         Se seu arquivo não atende a esses requisitos, por favor ajuste-o e tente novamente.
         """)
     
-    # Process button
-    if st.button("Processar"):
-        st.write("Starting processing...")
-        
-        # Processing
-        with st.spinner("Analisando..."):
+# Process button
+if st.button("Processar"):
+    st.write("Starting processing...")
+    
+    # Processing
+    with st.spinner("Analisando..."):
+        try:
+            # Create a fresh copy of the uploaded file
+            file_bytes = BytesIO(uploaded.read())
+            file_size = len(file_bytes.getvalue())
+            st.write(f"File size for processing: {file_size} bytes")
+            
+            # IMPORTANT: Reset the file pointer to the beginning
+            file_bytes.seek(0)
+            
+            # For diagnostic - check the file header
+            header = file_bytes.read(16).hex() if file_size > 16 else ""
+            st.write(f"File header: {header}")
+            file_bytes.seek(0)  # Reset again
+            
+            # Save to a temporary file
+            import tempfile
+            import os
+            temp_path = None
             try:
-                # Create a new BytesIO with fresh data
-                file_bytes = BytesIO(uploaded.read())
-                file_size = len(file_bytes.getvalue())
-                st.write(f"File size for processing: {file_size} bytes")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                    # Write the file content
+                    tmp.write(file_bytes.getvalue())
+                    temp_path = tmp.name
                 
-                # Save to disk and verify
-                import tempfile
-                temp_path = None
-                try:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                        tmp.write(file_bytes.getvalue())
-                        temp_path = tmp.name
+                st.write(f"Temporary file saved at: {temp_path}")
+                
+                # Verify the file was written correctly
+                if os.path.exists(temp_path):
+                    temp_size = os.path.getsize(temp_path)
+                    st.write(f"Temporary file size: {temp_size} bytes")
                     
-                    st.write(f"Temporary file saved at: {temp_path}")
+                    if temp_size == 0:
+                        st.error("Erro: O arquivo temporário está vazio!")
+                        raise ValueError("O arquivo temporário está vazio. Não foi possível copiar os dados do upload.")
                     
-                    # Verify the temporary file
-                    import os
-                    if os.path.exists(temp_path):
-                        temp_file_size = os.path.getsize(temp_path)
-                        st.write(f"Temporary file size: {temp_file_size} bytes")
+                    # Read the file directly from disk
+                    with open(temp_path, "rb") as f:
+                        temp_data = f.read()
+                        st.write(f"Read {len(temp_data)} bytes from temp file")
                         
-                        # Use the file path directly instead of BytesIO
-                        with open(temp_path, "rb") as f:
-                            temp_data = f.read()
-                            process_bytes = BytesIO(temp_data)
-                            st.write(f"Read {len(temp_data)} bytes from temp file")
-                            
-                            # Process using the new BytesIO created from the temp file
-                            resultado = process_file(process_bytes)
-                    else:
-                        st.error("Temporary file was not created successfully")
-                finally:
-                    # Clean up temp file
-                    if temp_path and os.path.exists(temp_path):
-                        os.unlink(temp_path)
-                        st.write("Temporary file cleaned up")
+                        # CRITICAL: Create NEW BytesIO from the disk read
+                        process_bytes = BytesIO(temp_data)
+                        
+                        # Process the file
+                        resultado = process_file(process_bytes)
                 
                 # Success path
                 st.success("Pronto! Baixe o arquivo destacado:")
@@ -196,52 +204,58 @@ if uploaded:
                 )
                 st.balloons()
                 
-            except Exception as e:
-                # Error handling
-                st.error(f"Erro ao processar o arquivo: {str(e)}")
+            finally:
+                # Clean up temp file
+                if temp_path and os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                    st.write("Temporary file cleaned up")
+            
+        except Exception as e:
+            # Error handling
+            st.error(f"Erro ao processar o arquivo: {str(e)}")
+            
+            # Show detailed error info
+            error_details = traceback.format_exc()
+            with st.expander("Detalhes do Erro"):
+                st.code(error_details)
+            
+            # Check for common errors
+            error_msg = str(e).lower()
+            if "not a zip file" in error_msg:
+                st.warning("⚠️ O arquivo não é um arquivo Excel (.xlsx) válido. Verifique se o arquivo não está corrompido.")
                 
-                # Show detailed error info
-                error_details = traceback.format_exc()
-                with st.expander("Detalhes do Erro"):
-                    st.code(error_details)
+                # Additional debugging
+                st.write("Tentando diagnosticar o problema...")
+                try:
+                    # Check if we can re-read the file
+                    fresh_bytes = BytesIO(uploaded.read())
+                    st.write(f"Upload pode ser lido novamente: {len(fresh_bytes.getvalue())} bytes")
+                    
+                    # Check file header
+                    fresh_bytes.seek(0)
+                    header = fresh_bytes.read(16).hex()
+                    st.write(f"Primeiros 16 bytes: {header}")
+                    
+                    # Try different approach
+                    import pandas as pd
+                    st.write("Tentando ler com diferentes engines...")
+                    
+                    engines = ['openpyxl', 'xlrd', 'odf', 'pyxlsb']
+                    for engine in engines:
+                        try:
+                            st.write(f"Tentando com engine '{engine}'...")
+                            fresh_bytes.seek(0)
+                            df = pd.read_excel(fresh_bytes, engine=engine)
+                            st.write(f"✅ Sucesso com engine '{engine}'!")
+                            break
+                        except Exception as read_err:
+                            st.write(f"❌ Falha com engine '{engine}': {str(read_err)}")
+                except Exception as diag_err:
+                    st.write(f"Erro no diagnóstico: {str(diag_err)}")
                 
-                # Check for common errors
-                error_msg = str(e).lower()
-                if "not a zip file" in error_msg:
-                    st.warning("⚠️ O arquivo não é um arquivo Excel (.xlsx) válido. Verifique se o arquivo não está corrompido.")
-                    
-                    # Additional debugging
-                    st.write("Tentando diagnosticar o problema...")
-                    try:
-                        # Check if we can re-read the file
-                        fresh_bytes = BytesIO(uploaded.read())
-                        st.write(f"Upload pode ser lido novamente: {len(fresh_bytes.getvalue())} bytes")
-                        
-                        # Check file header
-                        fresh_bytes.seek(0)
-                        header = fresh_bytes.read(16).hex()
-                        st.write(f"Primeiros 16 bytes: {header}")
-                        
-                        # Try different approach
-                        import pandas as pd
-                        st.write("Tentando ler com diferentes engines...")
-                        
-                        engines = ['openpyxl', 'xlrd', 'odf', 'pyxlsb']
-                        for engine in engines:
-                            try:
-                                st.write(f"Tentando com engine '{engine}'...")
-                                fresh_bytes.seek(0)
-                                df = pd.read_excel(fresh_bytes, engine=engine)
-                                st.write(f"✅ Sucesso com engine '{engine}'!")
-                                break
-                            except Exception as read_err:
-                                st.write(f"❌ Falha com engine '{engine}': {str(read_err)}")
-                    except Exception as diag_err:
-                        st.write(f"Erro no diagnóstico: {str(diag_err)}")
-                    
-                elif "td dados" in error_msg:
-                    st.warning("⚠️ Verifique se seu arquivo Excel contém uma aba chamada exatamente 'TD Dados'")
-                elif "abel" in error_msg:
-                    st.warning("⚠️ Verifique se a coluna A contém a palavra 'ABEL'")
-                else:
-                    st.warning("⚠️ Verifique o formato do arquivo de acordo com as instruções")
+            elif "td dados" in error_msg:
+                st.warning("⚠️ Verifique se seu arquivo Excel contém uma aba chamada exatamente 'TD Dados'")
+            elif "abel" in error_msg:
+                st.warning("⚠️ Verifique se a coluna A contém a palavra 'ABEL'")
+            else:
+                st.warning("⚠️ Verifique o formato do arquivo de acordo com as instruções")

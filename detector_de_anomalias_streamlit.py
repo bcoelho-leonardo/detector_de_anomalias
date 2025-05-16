@@ -120,21 +120,52 @@ def process_file(file_like):
         Bytes do arquivo *_highlighted.xlsx.
     """
     try:
+        # Debug: Check input
+        if not hasattr(file_like, 'read'):
+            raise ValueError(f"Input não é um objeto file-like! Tipo recebido: {type(file_like)}")
+        
+        # Reset file pointer to beginning
+        file_like.seek(0)
+        file_size = len(file_like.getvalue())
+        print(f"Tamanho do arquivo: {file_size} bytes")
+        file_like.seek(0)  # Reset again after getting size
+        
         # -------- 1. Leitura bruta (sem header) ----------
-        raw_df = pd.read_excel(file_like, sheet_name="TD Dados", header=None)
-
+        print("Tentando ler o arquivo Excel...")
+        try:
+            raw_df = pd.read_excel(file_like, sheet_name="TD Dados", header=None)
+            print(f"Excel lido com sucesso. Shape: {raw_df.shape}")
+        except Exception as e:
+            print(f"Erro ao ler o Excel: {str(e)}")
+            if "No sheet named" in str(e):
+                # Check available sheets
+                import openpyxl
+                file_like.seek(0)
+                wb = openpyxl.load_workbook(file_like, read_only=True)
+                available_sheets = wb.sheetnames
+                print(f"Sheets disponíveis: {available_sheets}")
+                raise ValueError(f"A planilha 'TD Dados' não foi encontrada. Sheets disponíveis: {available_sheets}")
+            raise
+        
         # -------- 2. Identificar cabeçalho via "ABEL" ----
+        print("Procurando 'ABEL' na coluna A...")
         mask_abel = raw_df[0].astype(str).str.strip().str.upper() == "ABEL"
         if not mask_abel.any():
+            print("Valores na coluna A:", raw_df[0].astype(str).str.strip().head(20).tolist())
             raise ValueError("String 'ABEL' não encontrada na coluna A.")
 
         start_row = mask_abel.idxmax()
+        print(f"'ABEL' encontrado na linha {start_row+1}")
+        
         if start_row == 0:
             raise ValueError("Não há linha de cabeçalho acima de 'ABEL'.")
 
         header_row = start_row - 1
         if str(raw_df.iloc[start_row - 1, 0]).strip().upper() == "UNIDADE 1":
             header_row = start_row - 2  # cabeçalho uma linha acima
+            print("'UNIDADE 1' detectado. Usando header_row =", header_row)
+        else:
+            print("Usando header_row =", header_row)
 
         df = (
             raw_df.iloc[header_row:]
@@ -144,33 +175,56 @@ def process_file(file_like):
         df = df.iloc[1:]
         df = df.set_index(df.columns[0])
         df = df.iloc[:, :-1]  # remove última coluna (total geral)
+        print(f"DataFrame preparado. Shape: {df.shape}")
 
         # -------- 3. Filtrar colunas de data ------------
+        print("Filtrando colunas de data...")
         valid_cols = [
             c for c in df.columns
             if "total geral" not in str(c).lower()
             and "total général" not in str(c).lower()
         ]
+        print(f"Colunas válidas: {len(valid_cols)}")
+        
         dates = pd.to_datetime(valid_cols, format="%Y-%m", errors="coerce")
+        print("Datas convertidas:")
+        for c, d in zip(valid_cols[:5], dates[:5]):
+            print(f"  - {c} -> {d}")
+        if len(valid_cols) > 5:
+            print(f"  - ... mais {len(valid_cols)-5} colunas")
+            
         col_sorted = [
             c for c, d in sorted(zip(valid_cols, dates), key=lambda x: x[1] or pd.Timestamp.min)
         ]
         if len(col_sorted) > 30:
             col_sorted = col_sorted[-30:]
+            print(f"Limitando para as últimas 30 colunas. Última coluna: {col_sorted[-1]}")
+        else:
+            print(f"Usando todas as {len(col_sorted)} colunas. Última coluna: {col_sorted[-1]}")
+            
         df = df[col_sorted]
+        print(f"DataFrame após filtro de colunas. Shape: {df.shape}")
 
         # -------- 4. Detectar outliers ------------------
+        print("Detectando outliers...")
         lof_rows, miss_rows = detect_outliers(
             df=df,
             date_cols=col_sorted,
             fixed_cont=0.05,
             missing_threshold=0.2,
         )
+        print(f"Outliers LOF detectados: {len(lof_rows)}")
+        print(f"Outliers de dados ausentes: {len(miss_rows)}")
 
         # -------- 5. Destacar no Excel em memória -------
+        print("Carregando novamente o workbook para destacar...")
         file_like.seek(0)
         wb = load_workbook(file_like, data_only=True)
+        print(f"Workbook carregado. Sheets: {wb.sheetnames}")
+        
         offset = header_row + 2  # header + 1 (0-based → Excel 1-based)
+        print(f"Offset para destacar: {offset}")
+        
         output_bytes = highlight_workbook_in_memory(
             wb=wb,
             sheet_name="TD Dados",
@@ -179,6 +233,7 @@ def process_file(file_like):
             excel_row_offset=offset,
             excel_col_idx=2,
         )
+        print(f"Arquivo destacado gerado com sucesso. Tamanho: {len(output_bytes)} bytes")
         return output_bytes
 
     except Exception as exc:

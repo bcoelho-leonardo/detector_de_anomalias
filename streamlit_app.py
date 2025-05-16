@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri May 16 11:54:28 2025
+Created on Fri May 16 12:22:13 2025
+
 @author: Admin
 """
 import streamlit as st
@@ -13,12 +14,16 @@ import traceback
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from detector_de_anomalias_streamlit import process_file
 
-# Debug info at startup
+# Configure page
 st.set_page_config(page_title="Detector de Anomalias", layout="centered")
+
+# Debug info at startup
 st.title("📊 Detector de Anomalias Financeiras (último mês)")
 
-# Show debug version
-st.caption("Debug Version 1.0")
+# Show debug version & environment info
+st.caption(f"Debug Version 1.1 | Python {sys.version} | Path: {os.path.abspath(__file__)}")
+st.write(f"Diretório atual: {os.getcwd()}")
+st.write(f"Arquivos no diretório: {os.listdir()}")
 
 st.markdown(
 """
@@ -29,7 +34,7 @@ O algoritmo destacará:
 """
 )
 
-# File uploader with debug info
+# File uploader
 uploaded = st.file_uploader("Escolher arquivo Excel", type=["xlsx", "xls"])
 
 # When a file is uploaded
@@ -37,50 +42,41 @@ if uploaded:
     st.write(f"File '{uploaded.name}' uploaded successfully")
     st.write(f"File type: {type(uploaded)}")
     
+    # Create an expander for showing file info
+    with st.expander("Informações do Arquivo"):
+        file_bytes = BytesIO(uploaded.read())
+        st.write(f"Tamanho do arquivo: {len(file_bytes.getvalue())} bytes")
+        file_bytes.seek(0)  # Reset for future use
+        
+        # Try to check if it's a valid Excel file
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_bytes, read_only=True)
+            st.write(f"Sheets disponíveis: {wb.sheetnames}")
+            if "TD Dados" in wb.sheetnames:
+                st.success("✅ Encontrada aba 'TD Dados'")
+            else:
+                st.error("❌ Aba 'TD Dados' não encontrada!")
+        except Exception as e:
+            st.error(f"Erro ao verificar o arquivo Excel: {str(e)}")
+        file_bytes.seek(0)  # Reset again
+    
     # Process button
     if st.button("Processar"):
         st.write("Starting processing...")
         
-        # Processing with detailed debug info
+        # Processing
         with st.spinner("Analisando..."):
             try:
-                # Step 1: Read the file
-                st.write("Reading file...")
+                # Read file again to get fresh BytesIO
                 file_bytes = BytesIO(uploaded.read())
-                file_size = len(file_bytes.getvalue())
-                st.write(f"File size: {file_size} bytes")
+                st.write(f"File size: {len(file_bytes.getvalue())} bytes")
                 
-                # Step 2: Reset file pointer
-                st.write("Resetting file pointer...")
+                # Reset pointer and process
                 file_bytes.seek(0)
-                
-                # Step 3: Process the file
-                st.write("Calling process_file...")
                 resultado = process_file(file_bytes)
-                st.write(f"Processing complete! Result size: {len(resultado)} bytes")
                 
-            except Exception as e:
-                # Detailed error handling
-                st.write("⚠️ Error occurred during processing")
-                st.error(f"Erro ao processar o arquivo: {str(e)}")
-                
-                # Show traceback in code block
-                error_details = traceback.format_exc()
-                st.code(error_details)
-                
-                # Exception type info
-                st.write(f"Exception type: {type(e).__name__}")
-                
-                # Suggestions based on error type
-                if "TD Dados" in str(e):
-                    st.warning("Verifique se seu arquivo Excel contém uma aba chamada 'TD Dados'")
-                elif "ABEL" in str(e):
-                    st.warning("Verifique se a coluna A contém a palavra 'ABEL'")
-                elif "header" in str(e) or "cabeçalho" in str(e):
-                    st.warning("Verifique o formato do cabeçalho da planilha")
-                
-            else:
-                # Success handling
+                # Success path
                 st.success("Pronto! Baixe o arquivo destacado:")
                 st.download_button(
                     label="⬇️ Download Excel",
@@ -88,7 +84,22 @@ if uploaded:
                     file_name=uploaded.name.replace(".xlsx", "_highlighted.xlsx"),
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
-                
-                # Success details
-                st.write("✅ Arquivo processado com sucesso.")
                 st.balloons()
+                
+            except Exception as e:
+                # Error handling
+                st.error(f"Erro ao processar o arquivo: {str(e)}")
+                
+                # Show detailed error info
+                error_details = traceback.format_exc()
+                with st.expander("Detalhes do Erro"):
+                    st.code(error_details)
+                
+                # Check for common errors
+                error_msg = str(e).lower()
+                if "td dados" in error_msg:
+                    st.warning("⚠️ Verifique se seu arquivo Excel contém uma aba chamada 'TD Dados'")
+                elif "abel" in error_msg:
+                    st.warning("⚠️ Verifique se a coluna A contém a palavra 'ABEL'")
+                else:
+                    st.warning("⚠️ Verifique o formato do arquivo de acordo com as instruções")

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 from io import BytesIO
-from detector_de_anomalias_Claude import process_file
+from detector_de_anomalias_streamlit import process_file
 
 st.set_page_config(page_title="Detector de Anomalias", layout="centered")
 

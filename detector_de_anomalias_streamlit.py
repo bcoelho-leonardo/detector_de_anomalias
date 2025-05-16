@@ -124,140 +124,182 @@ def process_file(file_like):
         if not hasattr(file_like, 'read'):
             raise ValueError(f"Input não é um objeto file-like! Tipo recebido: {type(file_like)}")
         
-        # Reset file pointer to beginning
+        # Reset file pointer to beginning and check size
         file_like.seek(0)
-        file_size = len(file_like.getvalue())
-        print(f"Tamanho do arquivo: {file_size} bytes")
+        try:
+            file_size = len(file_like.getvalue())
+            print(f"Tamanho do arquivo: {file_size} bytes")
+        except Exception as size_err:
+            print(f"Erro ao obter tamanho: {size_err}")
+        
         file_like.seek(0)  # Reset again after getting size
         
-        # -------- 1. Leitura bruta (sem header) ----------
-        print("Tentando ler o arquivo Excel...")
+        # Check file header to diagnose format issues
         try:
-            # Explicitly specify the engine as 'openpyxl' for .xlsx files
-            raw_df = pd.read_excel(file_like, sheet_name="TD Dados", header=None, engine='openpyxl')
-            print(f"Excel lido com sucesso. Shape: {raw_df.shape}")
-        except Exception as e:
-            print(f"Erro ao ler o Excel: {str(e)}")
+            header_bytes = file_like.read(16)
+            header_hex = header_bytes.hex()
+            print(f"Primeiros 16 bytes: {header_hex}")
             
-            # Try different Excel engines if the first one fails
+            # Check for Excel signatures
+            is_xlsx = header_hex.startswith("504b0304")
+            is_xls = header_hex.startswith("d0cf11e0")
+            
+            if not (is_xlsx or is_xls):
+                print(f"AVISO: Assinatura de arquivo não corresponde a Excel: {header_hex}")
+            
+            file_like.seek(0)  # Reset pointer after header check
+        except Exception as header_err:
+            print(f"Erro ao verificar cabeçalho: {header_err}")
+            file_like.seek(0)  # Try to reset anyway
+        
+        # Try to save to temporary file first
+        try:
+            import tempfile
+            import os
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                file_like.seek(0)  # Ensure we're at the start
+                tmp_data = file_like.read()  # Read all data
+                tmp.write(tmp_data)
+                temp_path = tmp.name
+            
+            print(f"Arquivo salvo temporariamente em: {temp_path}")
+            print(f"Tamanho do arquivo temporário: {os.path.getsize(temp_path)} bytes")
+            
+            # -------- 1. Leitura bruta (sem header) ----------
+            print("Tentando ler o arquivo Excel do caminho temporário...")
             try:
-                print("Tentando com engine alternativo 'xlrd'...")
-                file_like.seek(0)
-                raw_df = pd.read_excel(file_like, sheet_name="TD Dados", header=None, engine='xlrd')
-                print(f"Excel lido com sucesso usando 'xlrd'. Shape: {raw_df.shape}")
-            except Exception as e2:
-                print(f"Falha com 'xlrd': {str(e2)}")
+                raw_df = pd.read_excel(temp_path, sheet_name="TD Dados", header=None, engine='openpyxl')
+                print(f"Excel lido com sucesso do arquivo temporário. Shape: {raw_df.shape}")
+            except Exception as e:
+                print(f"Erro ao ler com openpyxl do arquivo temporário: {str(e)}")
                 
-                # If the above fail, try checking available sheets
+                # Try different Excel engines if the first one fails
                 try:
-                    import openpyxl
-                    file_like.seek(0)
-                    wb = openpyxl.load_workbook(file_like, read_only=True)
-                    available_sheets = wb.sheetnames
-                    print(f"Sheets disponíveis via openpyxl: {available_sheets}")
-                    if "TD Dados" not in available_sheets:
-                        raise ValueError(f"A planilha 'TD Dados' não foi encontrada. Sheets disponíveis: {available_sheets}")
-                except Exception as e3:
-                    print(f"Falha ao verificar sheets com openpyxl: {str(e3)}")
+                    print("Tentando com engine alternativo 'xlrd'...")
+                    raw_df = pd.read_excel(temp_path, sheet_name="TD Dados", header=None, engine='xlrd')
+                    print(f"Excel lido com sucesso usando 'xlrd'. Shape: {raw_df.shape}")
+                except Exception as e2:
+                    print(f"Falha com 'xlrd': {str(e2)}")
+                    
+                    # If the above fail, try checking available sheets
+                    try:
+                        import openpyxl
+                        wb = openpyxl.load_workbook(temp_path, read_only=True)
+                        available_sheets = wb.sheetnames
+                        print(f"Sheets disponíveis via openpyxl: {available_sheets}")
+                        if "TD Dados" not in available_sheets:
+                            raise ValueError(f"A planilha 'TD Dados' não foi encontrada. Sheets disponíveis: {available_sheets}")
+                    except Exception as e3:
+                        print(f"Falha ao verificar sheets com openpyxl: {str(e3)}")
+                    
+                    # Re-raise the original error with more context
+                    raise ValueError(f"Não foi possível ler o arquivo Excel. Verifique se é um arquivo Excel válido (.xlsx/.xls) e contém uma aba 'TD Dados'. Erro original: {str(e)}") from e
+            
+            # -------- 2. Identificar cabeçalho via "ABEL" ----
+            print("Procurando 'ABEL' na coluna A...")
+            mask_abel = raw_df[0].astype(str).str.strip().str.upper() == "ABEL"
+            if not mask_abel.any():
+                print("Valores na coluna A:", raw_df[0].astype(str).str.strip().head(20).tolist())
+                raise ValueError("String 'ABEL' não encontrada na coluna A.")
+
+            start_row = mask_abel.idxmax()
+            print(f"'ABEL' encontrado na linha {start_row+1}")
+            
+            if start_row == 0:
+                raise ValueError("Não há linha de cabeçalho acima de 'ABEL'.")
+
+            header_row = start_row - 1
+            if str(raw_df.iloc[start_row - 1, 0]).strip().upper() == "UNIDADE 1":
+                header_row = start_row - 2  # cabeçalho uma linha acima
+                print("'UNIDADE 1' detectado. Usando header_row =", header_row)
+            else:
+                print("Usando header_row =", header_row)
+
+            df = (
+                raw_df.iloc[header_row:]
+                .reset_index(drop=True)
+            )
+            df.columns = df.iloc[0]
+            df = df.iloc[1:]
+            df = df.set_index(df.columns[0])
+            df = df.iloc[:, :-1]  # remove última coluna (total geral)
+            print(f"DataFrame preparado. Shape: {df.shape}")
+
+            # -------- 3. Filtrar colunas de data ------------
+            print("Filtrando colunas de data...")
+            valid_cols = [
+                c for c in df.columns
+                if "total geral" not in str(c).lower()
+                and "total général" not in str(c).lower()
+            ]
+            print(f"Colunas válidas: {len(valid_cols)}")
+            
+            dates = pd.to_datetime(valid_cols, format="%Y-%m", errors="coerce")
+            print("Datas convertidas:")
+            for c, d in zip(valid_cols[:5], dates[:5]):
+                print(f"  - {c} -> {d}")
+            if len(valid_cols) > 5:
+                print(f"  - ... mais {len(valid_cols)-5} colunas")
                 
-                # Re-raise the original error with more context
-                raise ValueError(f"Não foi possível ler o arquivo Excel. Verifique se é um arquivo Excel válido (.xlsx/.xls) e contém uma aba 'TD Dados'. Erro original: {str(e)}") from e
-        
-        # -------- 2. Identificar cabeçalho via "ABEL" ----
-        print("Procurando 'ABEL' na coluna A...")
-        mask_abel = raw_df[0].astype(str).str.strip().str.upper() == "ABEL"
-        if not mask_abel.any():
-            print("Valores na coluna A:", raw_df[0].astype(str).str.strip().head(20).tolist())
-            raise ValueError("String 'ABEL' não encontrada na coluna A.")
+            col_sorted = [
+                c for c, d in sorted(zip(valid_cols, dates), key=lambda x: x[1] or pd.Timestamp.min)
+            ]
+            if len(col_sorted) > 30:
+                col_sorted = col_sorted[-30:]
+                print(f"Limitando para as últimas 30 colunas. Última coluna: {col_sorted[-1]}")
+            else:
+                print(f"Usando todas as {len(col_sorted)} colunas. Última coluna: {col_sorted[-1]}")
+                
+            df = df[col_sorted]
+            print(f"DataFrame após filtro de colunas. Shape: {df.shape}")
 
-        start_row = mask_abel.idxmax()
-        print(f"'ABEL' encontrado na linha {start_row+1}")
-        
-        if start_row == 0:
-            raise ValueError("Não há linha de cabeçalho acima de 'ABEL'.")
+            # -------- 4. Detectar outliers ------------------
+            print("Detectando outliers...")
+            lof_rows, miss_rows = detect_outliers(
+                df=df,
+                date_cols=col_sorted,
+                fixed_cont=0.05,
+                missing_threshold=0.2,
+            )
+            print(f"Outliers LOF detectados: {len(lof_rows)}")
+            print(f"Outliers de dados ausentes: {len(miss_rows)}")
 
-        header_row = start_row - 1
-        if str(raw_df.iloc[start_row - 1, 0]).strip().upper() == "UNIDADE 1":
-            header_row = start_row - 2  # cabeçalho uma linha acima
-            print("'UNIDADE 1' detectado. Usando header_row =", header_row)
-        else:
-            print("Usando header_row =", header_row)
-
-        df = (
-            raw_df.iloc[header_row:]
-            .reset_index(drop=True)
-        )
-        df.columns = df.iloc[0]
-        df = df.iloc[1:]
-        df = df.set_index(df.columns[0])
-        df = df.iloc[:, :-1]  # remove última coluna (total geral)
-        print(f"DataFrame preparado. Shape: {df.shape}")
-
-        # -------- 3. Filtrar colunas de data ------------
-        print("Filtrando colunas de data...")
-        valid_cols = [
-            c for c in df.columns
-            if "total geral" not in str(c).lower()
-            and "total général" not in str(c).lower()
-        ]
-        print(f"Colunas válidas: {len(valid_cols)}")
-        
-        dates = pd.to_datetime(valid_cols, format="%Y-%m", errors="coerce")
-        print("Datas convertidas:")
-        for c, d in zip(valid_cols[:5], dates[:5]):
-            print(f"  - {c} -> {d}")
-        if len(valid_cols) > 5:
-            print(f"  - ... mais {len(valid_cols)-5} colunas")
+            # -------- 5. Destacar no Excel em memória -------
+            print("Carregando novamente o workbook para destacar...")
+            import openpyxl
+            wb = openpyxl.load_workbook(temp_path, data_only=True)
+            print(f"Workbook carregado. Sheets: {wb.sheetnames}")
             
-        col_sorted = [
-            c for c, d in sorted(zip(valid_cols, dates), key=lambda x: x[1] or pd.Timestamp.min)
-        ]
-        if len(col_sorted) > 30:
-            col_sorted = col_sorted[-30:]
-            print(f"Limitando para as últimas 30 colunas. Última coluna: {col_sorted[-1]}")
-        else:
-            print(f"Usando todas as {len(col_sorted)} colunas. Última coluna: {col_sorted[-1]}")
+            offset = header_row + 2  # header + 1 (0-based → Excel 1-based)
+            print(f"Offset para destacar: {offset}")
             
-        df = df[col_sorted]
-        print(f"DataFrame após filtro de colunas. Shape: {df.shape}")
-
-        # -------- 4. Detectar outliers ------------------
-        print("Detectando outliers...")
-        lof_rows, miss_rows = detect_outliers(
-            df=df,
-            date_cols=col_sorted,
-            fixed_cont=0.05,
-            missing_threshold=0.2,
-        )
-        print(f"Outliers LOF detectados: {len(lof_rows)}")
-        print(f"Outliers de dados ausentes: {len(miss_rows)}")
-
-        # -------- 5. Destacar no Excel em memória -------
-        print("Carregando novamente o workbook para destacar...")
-        file_like.seek(0)
-        wb = load_workbook(file_like, data_only=True)
-        print(f"Workbook carregado. Sheets: {wb.sheetnames}")
+            output_bytes = highlight_workbook_in_memory(
+                wb=wb,
+                sheet_name="TD Dados",
+                lof_rows=lof_rows,
+                miss_rows=miss_rows,
+                excel_row_offset=offset,
+                excel_col_idx=2,
+            )
+            print(f"Arquivo destacado gerado com sucesso. Tamanho: {len(output_bytes)} bytes")
+            
+            return output_bytes
+            
+        finally:
+            # Clean up
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                    print("Arquivo temporário removido")
+                except Exception as rm_err:
+                    print(f"Erro ao remover arquivo temporário: {rm_err}")
         
-        offset = header_row + 2  # header + 1 (0-based → Excel 1-based)
-        print(f"Offset para destacar: {offset}")
-        
-        output_bytes = highlight_workbook_in_memory(
-            wb=wb,
-            sheet_name="TD Dados",
-            lof_rows=lof_rows,
-            miss_rows=miss_rows,
-            excel_row_offset=offset,
-            excel_col_idx=2,
-        )
-        print(f"Arquivo destacado gerado com sucesso. Tamanho: {len(output_bytes)} bytes")
-        return output_bytes
-
     except Exception as exc:
         print("Erro em process_file:", exc)
         traceback.print_exc()
         raise
-
-
+                    
 ###############################################################################
 # 3) Modo CLI opcional
 ###############################################################################

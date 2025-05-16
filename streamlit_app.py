@@ -149,31 +149,42 @@ if uploaded:
         # Processing
         with st.spinner("Analisando..."):
             try:
-                # Read file again to get fresh BytesIO
+                # Create a new BytesIO with fresh data
                 file_bytes = BytesIO(uploaded.read())
+                file_size = len(file_bytes.getvalue())
+                st.write(f"File size for processing: {file_size} bytes")
                 
-                # Try to diagnose potential file issues
-                file_bytes.seek(0)
-                header = file_bytes.read(8).hex()
-                if not (header.startswith("504b0304") or header.startswith("d0cf11e0")):
-                    st.warning("⚠️ O arquivo não parece ser um Excel válido. Verifique o formato do arquivo.")
-                
-                # Reset pointer and process
-                file_bytes.seek(0)
-                
-                # Write file to temp location for better reliability
+                # Save to disk and verify
                 import tempfile
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                    tmp.write(file_bytes.getvalue())
-                    temp_path = tmp.name
-                
-                # Use the file path instead of BytesIO for more reliable processing
-                with open(temp_path, "rb") as f:
-                    resultado = process_file(BytesIO(f.read()))
-                
-                # Clean up temp file
-                import os
-                os.unlink(temp_path)
+                temp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                        tmp.write(file_bytes.getvalue())
+                        temp_path = tmp.name
+                    
+                    st.write(f"Temporary file saved at: {temp_path}")
+                    
+                    # Verify the temporary file
+                    import os
+                    if os.path.exists(temp_path):
+                        temp_file_size = os.path.getsize(temp_path)
+                        st.write(f"Temporary file size: {temp_file_size} bytes")
+                        
+                        # Use the file path directly instead of BytesIO
+                        with open(temp_path, "rb") as f:
+                            temp_data = f.read()
+                            process_bytes = BytesIO(temp_data)
+                            st.write(f"Read {len(temp_data)} bytes from temp file")
+                            
+                            # Process using the new BytesIO created from the temp file
+                            resultado = process_file(process_bytes)
+                    else:
+                        st.error("Temporary file was not created successfully")
+                finally:
+                    # Clean up temp file
+                    if temp_path and os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                        st.write("Temporary file cleaned up")
                 
                 # Success path
                 st.success("Pronto! Baixe o arquivo destacado:")
@@ -198,6 +209,36 @@ if uploaded:
                 error_msg = str(e).lower()
                 if "not a zip file" in error_msg:
                     st.warning("⚠️ O arquivo não é um arquivo Excel (.xlsx) válido. Verifique se o arquivo não está corrompido.")
+                    
+                    # Additional debugging
+                    st.write("Tentando diagnosticar o problema...")
+                    try:
+                        # Check if we can re-read the file
+                        fresh_bytes = BytesIO(uploaded.read())
+                        st.write(f"Upload pode ser lido novamente: {len(fresh_bytes.getvalue())} bytes")
+                        
+                        # Check file header
+                        fresh_bytes.seek(0)
+                        header = fresh_bytes.read(16).hex()
+                        st.write(f"Primeiros 16 bytes: {header}")
+                        
+                        # Try different approach
+                        import pandas as pd
+                        st.write("Tentando ler com diferentes engines...")
+                        
+                        engines = ['openpyxl', 'xlrd', 'odf', 'pyxlsb']
+                        for engine in engines:
+                            try:
+                                st.write(f"Tentando com engine '{engine}'...")
+                                fresh_bytes.seek(0)
+                                df = pd.read_excel(fresh_bytes, engine=engine)
+                                st.write(f"✅ Sucesso com engine '{engine}'!")
+                                break
+                            except Exception as read_err:
+                                st.write(f"❌ Falha com engine '{engine}': {str(read_err)}")
+                    except Exception as diag_err:
+                        st.write(f"Erro no diagnóstico: {str(diag_err)}")
+                    
                 elif "td dados" in error_msg:
                     st.warning("⚠️ Verifique se seu arquivo Excel contém uma aba chamada exatamente 'TD Dados'")
                 elif "abel" in error_msg:

@@ -5,7 +5,7 @@ Created on Thu May 15 20:42:05 2025
 @author: Admin
 """
 
-# detector_de_anomalias_Claude.py
+# detector_de_anomalias_streamlit.py
 # -*- coding: utf-8 -*-
 """
 Versão modular para uso em Streamlit:
@@ -15,7 +15,6 @@ Versão modular para uso em Streamlit:
   - Executa toda a lógica de detecção (LOF + dados ausentes)
   - Devolve os bytes do novo arquivo *_highlighted.xlsx
 
-Obs.: continua possível rodar em modo CLI (`python detector_de_anomalias_Claude.py`)
 """
 
 import os

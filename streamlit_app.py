@@ -29,8 +29,9 @@ if uploaded:
             try:
                 resultado = process_file(BytesIO(uploaded.read()))
             except Exception as e:
-                st.error(f"Ocorreu um erro ao processar o arquivo: {str(e)}")
-                raise
+                import traceback
+                st.error(f"Erro ao processar o arquivo: {e}")
+                st.exception(e)  # Shows traceback in Streamlit UI
             else:
                 st.success("Pronto! Baixe o arquivo destacado:")
                 st.download_button(

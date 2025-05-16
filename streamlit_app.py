@@ -51,12 +51,28 @@ if uploaded:
         # Try to check if it's a valid Excel file
         try:
             import openpyxl
-            wb = openpyxl.load_workbook(file_bytes, read_only=True)
-            st.write(f"Sheets disponíveis: {wb.sheetnames}")
-            if "TD Dados" in wb.sheetnames:
-                st.success("✅ Encontrada aba 'TD Dados'")
-            else:
-                st.error("❌ Aba 'TD Dados' não encontrada!")
+            try:
+                wb = openpyxl.load_workbook(file_bytes, read_only=True)
+                st.write(f"Sheets disponíveis (openpyxl): {wb.sheetnames}")
+                if "TD Dados" in wb.sheetnames:
+                    st.success("✅ Encontrada aba 'TD Dados'")
+                else:
+                    st.error("❌ Aba 'TD Dados' não encontrada!")
+            except Exception as e1:
+                st.warning(f"Não foi possível ler com openpyxl: {str(e1)}")
+                
+                # Try alternative engine
+                try:
+                    import pandas as pd
+                    file_bytes.seek(0)
+                    xls = pd.ExcelFile(file_bytes, engine='xlrd')
+                    st.write(f"Sheets disponíveis (xlrd): {xls.sheet_names}")
+                    if "TD Dados" in xls.sheet_names:
+                        st.success("✅ Encontrada aba 'TD Dados'")
+                    else:
+                        st.error("❌ Aba 'TD Dados' não encontrada!")
+                except Exception as e2:
+                    st.error(f"Não foi possível verificar o arquivo com nenhum engine Excel. Erro: {str(e2)}")
         except Exception as e:
             st.error(f"Erro ao verificar o arquivo Excel: {str(e)}")
         file_bytes.seek(0)  # Reset again

@@ -4,3 +4,4 @@ numpy<2
 scikit-learn
 scipy
 openpyxl
+xlrd>=2.0.0

@@ -133,19 +133,35 @@ def process_file(file_like):
         # -------- 1. Leitura bruta (sem header) ----------
         print("Tentando ler o arquivo Excel...")
         try:
-            raw_df = pd.read_excel(file_like, sheet_name="TD Dados", header=None)
+            # Explicitly specify the engine as 'openpyxl' for .xlsx files
+            raw_df = pd.read_excel(file_like, sheet_name="TD Dados", header=None, engine='openpyxl')
             print(f"Excel lido com sucesso. Shape: {raw_df.shape}")
         except Exception as e:
             print(f"Erro ao ler o Excel: {str(e)}")
-            if "No sheet named" in str(e):
-                # Check available sheets
-                import openpyxl
+            
+            # Try different Excel engines if the first one fails
+            try:
+                print("Tentando com engine alternativo 'xlrd'...")
                 file_like.seek(0)
-                wb = openpyxl.load_workbook(file_like, read_only=True)
-                available_sheets = wb.sheetnames
-                print(f"Sheets disponíveis: {available_sheets}")
-                raise ValueError(f"A planilha 'TD Dados' não foi encontrada. Sheets disponíveis: {available_sheets}")
-            raise
+                raw_df = pd.read_excel(file_like, sheet_name="TD Dados", header=None, engine='xlrd')
+                print(f"Excel lido com sucesso usando 'xlrd'. Shape: {raw_df.shape}")
+            except Exception as e2:
+                print(f"Falha com 'xlrd': {str(e2)}")
+                
+                # If the above fail, try checking available sheets
+                try:
+                    import openpyxl
+                    file_like.seek(0)
+                    wb = openpyxl.load_workbook(file_like, read_only=True)
+                    available_sheets = wb.sheetnames
+                    print(f"Sheets disponíveis via openpyxl: {available_sheets}")
+                    if "TD Dados" not in available_sheets:
+                        raise ValueError(f"A planilha 'TD Dados' não foi encontrada. Sheets disponíveis: {available_sheets}")
+                except Exception as e3:
+                    print(f"Falha ao verificar sheets com openpyxl: {str(e3)}")
+                
+                # Re-raise the original error with more context
+                raise ValueError(f"Não foi possível ler o arquivo Excel. Verifique se é um arquivo Excel válido (.xlsx/.xls) e contém uma aba 'TD Dados'. Erro original: {str(e)}") from e
         
         # -------- 2. Identificar cabeçalho via "ABEL" ----
         print("Procurando 'ABEL' na coluna A...")

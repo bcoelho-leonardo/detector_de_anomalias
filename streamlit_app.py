@@ -7,6 +7,9 @@ Created on Fri May 16 12:22:13 2025
 import streamlit as st
 import traceback
 
+# set_page_config MUST be the first Streamlit command
+st.set_page_config(page_title="Detector de Anomalias", layout="centered")
+
 # Global try-except block to catch any application-level errors
 try:
     from io import BytesIO
@@ -23,9 +26,6 @@ try:
         st.error(f"Erro ao importar o módulo: {str(import_err)}")
         st.code(traceback.format_exc())
         st.stop()
-
-    # Configure page
-    st.set_page_config(page_title="Detector de Anomalias", layout="centered")
 
     # Debug info at startup
     st.title("📊 Detector de Anomalias Financeiras (último mês)")
